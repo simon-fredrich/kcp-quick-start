@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 
-# deploy-infra.sh — Deploy a kind cluster running kcp with two isolated team
-# workspaces (team-alpha, team-beta), each with its own client certificate and
-# scoped kubeconfig.
+# deploy-infra.sh — Deploy a kind cluster running kcp with with
+# flux-operator and cert-manager.
 #
 # Steps:
 #   1. Create kind cluster
-#   2. Install cert-manager
-#   3. Deploy kcp (two-pass helm upgrade so kcp and kcp-front-proxy can
-#      resolve each other via hostAliases)
+#   2. Install flux-operator
+#   3. Install cert-manager
+#   4. Deploy kcp
 
 
 set -euo pipefail
