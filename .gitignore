@@ -1,0 +1,3 @@
+admin.kubeconfig
+*.crt
+*.key
