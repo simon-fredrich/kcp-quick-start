@@ -1,0 +1,19 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: team-beta-cert
+spec:
+  commonName: team-beta-admin
+  issuerRef:
+    name: kcp-front-proxy-client-issuer
+    kind: Issuer
+  secretName: team-beta-cert
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - client auth
+  subject:
+    organizations:
+      - team-beta
