@@ -7,10 +7,6 @@ kubectl config use-context kind-kcp
 kubectl apply -f cert-manager.yaml
 kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=300s
 
-# step 3: configure DNS
-echo "configure DNS"
-echo "127.0.0.1 kcp.local.test" | sudo tee -a /etc/hosts
-
 # step 4: deploy kcp with helm
 helm repo add kcp https://kcp-dev.github.io/helm-charts
 helm repo update
@@ -18,7 +14,7 @@ helm repo update
 helm upgrade --install kcp kcp/kcp \
   --namespace kcp \
   --create-namespace \
-  --set externalHostname=kcp.local.test \
+  --set externalHostname=localhost \
   --set-string externalPort=8443 \
   --set kcpFrontProxy.service.type=NodePort \
   --set kcpFrontProxy.service.nodePort=30443 \
@@ -31,10 +27,10 @@ helm upgrade kcp kcp/kcp \
   --reuse-values \
   --set kcp.hostAliases.enabled=true \
   --set "kcp.hostAliases.values[0].ip=${KCP_FRONT_PROXY_IP}" \
-  --set "kcp.hostAliases.values[0].hostnames[0]=kcp.local.test" \
+  --set "kcp.hostAliases.values[0].hostnames[0]=localhost" \
   --set kcpFrontProxy.hostAliases.enabled=true \
   --set "kcpFrontProxy.hostAliases.values[0].ip=${KCP_FRONT_PROXY_IP}" \
-  --set "kcpFrontProxy.hostAliases.values[0].hostnames[0]=kcp.local.test" \
+  --set "kcpFrontProxy.hostAliases.values[0].hostnames[0]=localhost" \
   --wait
 
 kubectl get pods -n kcp
@@ -44,7 +40,7 @@ kubectl get secret kcp-ca -n kcp \
   -o=jsonpath='{.data.tls\.crt}' | base64 -d > ca.crt
 
 kubectl --kubeconfig=admin.kubeconfig config set-cluster base \
-  --server https://kcp.local.test:8443/clusters/root \
+  --server https://localhost:8443/clusters/root \
   --certificate-authority=ca.crt
 
 kubectl apply -n kcp -f admin-client-cert.yaml
