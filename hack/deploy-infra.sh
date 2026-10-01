@@ -235,6 +235,7 @@ deploy_kcp() {
     --set audit.enabled=false
 
   wait_for_kcp "${DEPLOYMENT_TIMEOUT}"
+  log "first run of kcp install completed"
 
   local front_proxy_ip
   front_proxy_ip="$(kubectl get svc kcp-front-proxy -n "${KCP_NAMESPACE}" \
@@ -253,8 +254,10 @@ deploy_kcp() {
     --set "kcp.hostAliases.values[0].hostnames[0]=${KCP_EXTERNAL_HOSTNAME}" \
     --set kcpFrontProxy.hostAliases.enabled=true \
     --set "kcpFrontProxy.hostAliases.values[0].ip=${front_proxy_ip}" \
-    --set "kcpFrontProxy.hostAliases.values[0].hostnames[0]=${KCP_EXTERNAL_HOSTNAME}" \
-    --wait
+    --set "kcpFrontProxy.hostAliases.values[0].hostnames[0]=${KCP_EXTERNAL_HOSTNAME}"
+
+  wait_for_kcp "${DEPLOYMENT_TIMEOUT}"
+  log "second run of kcp install completed"
 
   kubectl get pods -n "${KCP_NAMESPACE}"
   log "kcp deployed."
@@ -277,18 +280,19 @@ main() {
   preflight_checks
 
   # Step 1: Create kind cluster
-  log "=== Step 1/n: Create kind cluster ==="
+  log "=== Step 1/4: Create kind cluster ==="
   create_kind_cluster
 
-  log "=== Step 2/n: Install flux-operator ==="
+  # Step 2: Install flux-operator
+  log "=== Step 2/4: Install flux-operator ==="
   install_flux_operator
 
-  # Step 2: Install cert-manager
-  log "=== Step 3/n: Install cert-manager ==="
+  # Step 3: Install cert-manager
+  log "=== Step 3/4: Install cert-manager ==="
   install_cert_manager
 
   # Step 3: Deploy kcp
-  log "=== Step 4/n: Deploy kcp ==="
+  log "=== Step 4/4: Deploy kcp ==="
   deploy_kcp
 
   log ""
