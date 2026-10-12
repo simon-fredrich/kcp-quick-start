@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
 
-# deploy-infra.sh — Deploy a kind cluster running kcp with with
-# flux-operator and cert-manager.
-#
-# Steps:
-#   1. Create kind cluster
-#   2. Install flux-operator
-#   3. Install cert-manager
-#   4. Deploy kcp
-
-
-set -euo pipefail
+set -o errexit
+set -o nounset
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -20,13 +12,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 CLUSTER_NAME="${CLUSTER_NAME:-kcp}"
 KIND_CONFIG="${KIND_CONFIG:-kind-config.yaml}"
-KCP_NAMESPACE="${KCP_NAMESPACE:-kcp}"
-KCP_EXTERNAL_HOSTNAME="${KCP_EXTERNAL_HOSTNAME:-localhost}"
-KCP_PORT="${KCP_PORT:-8443}"
-KCP_NODE_PORT="${KCP_NODE_PORT:-30443}"
+ROOT_SHARD="${ROOT_SHARD:-root-shard.yaml}"
+FRONT_PROXY="${FRONT_PROXY:-front-proxy.yaml}"
+ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin-kubeconfig.yaml}"
 DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-600s}"
 
-FLUX_OPERATOR_VERSION="${FLUX_OPERATOR_VERSION:-v0.60.0}"
 CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.21.2}"
 
 # kind defaults to the docker provider; tell it to drive podman instead.
@@ -68,143 +58,23 @@ create_kind_cluster() {
   if kind get clusters 2>/dev/null | grep -qx "${CLUSTER_NAME}"; then
     log "Kind cluster '${CLUSTER_NAME}' already exists — skipping creation."
   else
-    kind create cluster --name "${CLUSTER_NAME}" --config="${SCRIPT_DIR}/${KIND_CONFIG}"
+    log "Generating kind cluster config..."
+
+    cat >"${REPO_ROOT}/${KIND_CONFIG}" <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 30443
+    hostPort: 8443
+    protocol: TCP
+EOF
+
+    kind create cluster --name "${CLUSTER_NAME}" --config="${REPO_ROOT}/${KIND_CONFIG}"
     log "Kind cluster '${CLUSTER_NAME}' created."
   fi
   kubectl config use-context "kind-${CLUSTER_NAME}"
-}
-
-wait_for_fluxinstance() {
-  local timeout="${1:-${DEPLOYMENT_TIMEOUT}}"
-  timeout="${timeout%s}"
-  local deadline=$(( $(date +%s) + timeout ))
-
-  log "Waiting up to ${timeout}s for FluxInstance/flux to become Ready..."
-
-  while true; do
-    local ready_status
-    ready_status=$(kubectl get fluxinstance/flux -n flux-system -o json 2>/dev/null \
-      | jq -r '.status.conditions[]? | select(.type == "Ready") | .status' 2>/dev/null) || true
-
-    if [[ "${ready_status}" == "True" ]]; then
-      log "FluxInstance/flux is Ready."
-      return 0
-    fi
-
-    local reason message
-    reason=$(kubectl get fluxinstance/flux -n flux-system -o json 2>/dev/null \
-      | jq -r '.status.conditions[]? | select(.type == "Ready") | .reason // "Pending"' 2>/dev/null) || true
-    message=$(kubectl get fluxinstance/flux -n flux-system -o json 2>/dev/null \
-      | jq -r '.status.conditions[]? | select(.type == "Ready") | .message // ""' 2>/dev/null) || true
-    log "  FluxInstance/flux is not Ready yet (reason: ${reason:-Pending})."
-    if [[ -n "${message}" ]]; then
-      log "    ${message}"
-    fi
-
-    if [[ $(date +%s) -ge ${deadline} ]]; then
-      log "ERROR: Timed out waiting for FluxInstance/flux after ${timeout}s."
-      log "FluxInstance description:"
-      kubectl describe fluxinstance/flux -n flux-system 2>/dev/null || true
-      log "FluxReport:"
-      kubectl get fluxreport/flux -n flux-system -o yaml 2>/dev/null || true
-      exit 1
-    fi
-
-    sleep 10
-  done
-}
-
-wait_for_cert_manager() {
-  local timeout="${1:-${DEPLOYMENT_TIMEOUT}}"
-  timeout="${timeout%s}"
-  local deadline=$(( $(date +%s) + timeout ))
-  local deployments=(cert-manager cert-manager-cainjector cert-manager-webhook)
-
-  log "Waiting up to ${timeout}s for Deployment/{${deployments[*]}} to become Available..."
-
-  while true; do
-    local all_available=true dep status reason message
-    for dep in "${deployments[@]}"; do
-      status=$(kubectl get -n cert-manager "deployment/${dep}" \
-        -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null) || true
-
-      if [[ "${status}" != "True" ]]; then
-        all_available=false
-        reason=$(kubectl get -n cert-manager "deployment/${dep}" \
-          -o jsonpath='{.status.conditions[?(@.type=="Available")].reason}' 2>/dev/null) || true
-        message=$(kubectl get -n cert-manager "deployment/${dep}" \
-          -o jsonpath='{.status.conditions[?(@.type=="Available")].message}' 2>/dev/null) || true
-        log "  Deployment/${dep} is not Available yet (reason: ${reason:-Pending})."
-        if [[ -n "${message}" ]]; then
-          log "    ${message}"
-        fi
-      fi
-    done
-
-    if [[ "${all_available}" == "true" ]]; then
-      return 0
-    fi
-
-    if [[ $(date +%s) -ge ${deadline} ]]; then
-      log "ERROR: Timed out waiting for cert-manager deployments after ${timeout}s."
-      kubectl get deployment -n cert-manager
-      exit 1
-    fi
-
-    sleep 5
-  done
-}
-
-wait_for_kcp() {
-  local timeout="${1:-${DEPLOYMENT_TIMEOUT}}"
-  timeout="${timeout%s}"
-  local deadline=$(( $(date +%s) + timeout ))
-  local deployments=(kcp kcp-front-proxy)
-
-  log "Waiting up to ${timeout}s for Deployment/{${deployments[*]}} to become Available..."
-
-  while true; do
-    local all_available=true dep status reason message
-    for dep in "${deployments[@]}"; do
-      status=$(kubectl get -n "${KCP_NAMESPACE}" "deployment/${dep}" \
-        -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null) || true
-
-      if [[ "${status}" != "True" ]]; then
-        all_available=false
-        reason=$(kubectl get -n "${KCP_NAMESPACE}" "deployment/${dep}" \
-          -o jsonpath='{.status.conditions[?(@.type=="Available")].reason}' 2>/dev/null) || true
-        message=$(kubectl get -n "${KCP_NAMESPACE}" "deployment/${dep}" \
-          -o jsonpath='{.status.conditions[?(@.type=="Available")].message}' 2>/dev/null) || true
-        log "  Deployment/${dep} is not Available yet (reason: ${reason:-Pending})."
-        if [[ -n "${message}" ]]; then
-          log "    ${message}"
-        fi
-      fi
-    done
-
-    if [[ "${all_available}" == "true" ]]; then
-      return 0
-    fi
-
-    if [[ $(date +%s) -ge ${deadline} ]]; then
-      log "ERROR: Timed out waiting for kcp deployments after ${timeout}s."
-      kubectl get deployment -n "${KCP_NAMESPACE}"
-      exit 1
-    fi
-
-    sleep 5
-  done
-}
-
-# ---------------------------------------------------------------------------
-# install_flux_operator — Apply flux-operator and wait for it to roll out.
-# ---------------------------------------------------------------------------
-install_flux_operator() {
-  kubectl apply -f \
-    "https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/${FLUX_OPERATOR_VERSION}/install.yaml"
-  kubectl apply -f "${REPO_ROOT}/deploy/flux-system/fluxinstance.yaml"
-  wait_for_fluxinstance "${DEPLOYMENT_TIMEOUT}"
-  log "flux-operator installed and FluxInstance/flux is Ready."
 }
 
 # ---------------------------------------------------------------------------
@@ -212,54 +82,131 @@ install_flux_operator() {
 # ---------------------------------------------------------------------------
 install_cert_manager() {
   kubectl apply -f \
-    "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
-  wait_for_cert_manager "${DEPLOYMENT_TIMEOUT}"
+    "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" --wait=true
   log "cert-manager is Available."
 }
 
 # ---------------------------------------------------------------------------
-# deploy_kcp — Install kcp via helm, then re-run with hostAliases so
-# kcp-front-proxy and kcp can resolve KCP_EXTERNAL_HOSTNAME back to each other.
+# deploy_kcp — Install kcp via helm
 # ---------------------------------------------------------------------------
 deploy_kcp() {
+  log "Add kcp repo to helm"
   helm repo add kcp https://kcp-dev.github.io/helm-charts >/dev/null
   helm repo update >/dev/null
 
-  helm upgrade --install kcp kcp/kcp \
-    --namespace "${KCP_NAMESPACE}" \
-    --create-namespace \
-    --set externalHostname="${KCP_EXTERNAL_HOSTNAME}" \
-    --set-string externalPort="${KCP_PORT}" \
-    --set kcpFrontProxy.service.type=NodePort \
-    --set kcpFrontProxy.service.nodePort="${KCP_NODE_PORT}" \
-    --set audit.enabled=false
-
-  wait_for_kcp "${DEPLOYMENT_TIMEOUT}"
-  log "first run of kcp install completed"
-
-  local front_proxy_ip
-  front_proxy_ip="$(kubectl get svc kcp-front-proxy -n "${KCP_NAMESPACE}" \
-    -o jsonpath='{.spec.clusterIP}')"
-  if [[ -z "${front_proxy_ip}" ]]; then
-    log "ERROR: could not resolve the kcp-front-proxy ClusterIP."
-    exit 1
+  log "Check if kcp-operator is already installed"
+  if helm status kcp-operator --namespace kcp-operator >/dev/null 2>&1; then
+    log "kcp-operator is already installed"
+  else
+    log "kcp-operator is not installed"
+    log "Install kcp-operator using helm"
+    helm install --create-namespace --namespace kcp-operator kcp-operator kcp/kcp-operator
   fi
-  log "kcp-front-proxy ClusterIP: ${front_proxy_ip}"
 
-  helm upgrade kcp kcp/kcp \
-    --namespace "${KCP_NAMESPACE}" \
-    --reuse-values \
-    --set kcp.hostAliases.enabled=true \
-    --set "kcp.hostAliases.values[0].ip=${front_proxy_ip}" \
-    --set "kcp.hostAliases.values[0].hostnames[0]=${KCP_EXTERNAL_HOSTNAME}" \
-    --set kcpFrontProxy.hostAliases.enabled=true \
-    --set "kcpFrontProxy.hostAliases.values[0].ip=${front_proxy_ip}" \
-    --set "kcpFrontProxy.hostAliases.values[0].hostnames[0]=${KCP_EXTERNAL_HOSTNAME}"
+  if ls kcp-operator >/dev/null 2>&1; then
+    log "https://github.com/kcp-dev/kcp-operator already cloned"
+  else
+    git clone https://github.com/kcp-dev/kcp-operator
+  fi
 
-  wait_for_kcp "${DEPLOYMENT_TIMEOUT}"
-  log "second run of kcp install completed"
+  if helm status etcd >/dev/null 2>&1; then
+    log "etcd is already installed"
+  else
+    log "etcd is not installed"
+    log "Install etcd from kcp-operator using helm"
+    helm install etcd "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd"
+  fi
 
-  kubectl get pods -n "${KCP_NAMESPACE}"
+  log "Create Root Shard"
+  cat <<EOF | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+EOF
+  kubectl wait --for=condition=Ready issuer/selfsigned \
+  --timeout="${DEPLOYMENT_TIMEOUT}"
+  
+  cat <<EOF | kubectl apply -f -
+apiVersion: operator.kcp.io/v1alpha1
+kind: RootShard
+metadata:
+  name: root
+spec:
+  external:
+    # replace the hostname with the external DNS name for your kcp instance
+    hostname: localhost
+    port: 6443
+  certificates:
+    # this references the issuer created above
+    issuerRef:
+      group: cert-manager.io
+      kind: Issuer
+      name: selfsigned
+  cache:
+    embedded:
+      # kcp comes with a cache server accessible to all shards,
+      # in this case it is fine to enable the embedded instance
+      enabled: true
+  etcd:
+    endpoints:
+      # this is the service URL to etcd. Replace if Helm chart was
+      # installed under a different name or the namespace is not "default"
+      - http://etcd.default.svc.cluster.local:2379
+EOF
+  kubectl wait --for=condition=Available rootshard/root \
+  --timeout="${DEPLOYMENT_TIMEOUT}"
+
+  log "Set up Front Proxy"
+  cat <<EOF | kubectl apply -f -
+apiVersion: operator.kcp.io/v1alpha1
+kind: FrontProxy
+metadata:
+  name: frontproxy
+spec:
+  rootShard:
+    ref:
+      # the name of the RootShard object created before
+      name: root
+  serviceTemplate:
+    spec:
+      # expose this front-proxy via a load balancer
+      type: LoadBalancer
+EOF
+  kubectl wait --for=condition=Available frontproxy/frontproxy \
+  --timeout="${DEPLOYMENT_TIMEOUT}"
+
+  log "Create admin-kubeconfig"
+  cat <<EOF | kubectl apply -f -
+apiVersion: operator.kcp.io/v1alpha1
+kind: Kubeconfig
+metadata:
+  name: kubeconfig-kcp-admin
+spec:
+  # the user name embedded in the kubeconfig
+  username: kcp-admin
+  groups:
+    # system:kcp:admin is a special privileged group in kcp.
+    # the kubeconfig generated from this should be kept secure at all times
+    - system:kcp:admin
+  # the kubeconfig will be valid for 365d but will be automatically refreshed
+  validity: 8766h
+  secretRef:
+    # the name of the secret that the assembled kubeconfig should be written to
+    name: admin-kubeconfig
+  target:
+    # a reference to the frontproxy deployed previously so the kubeconfig is accepted by it
+    frontProxyRef:
+      name: frontproxy
+EOF
+  kubectl wait --for=condition=Available kubeconfig/kubeconfig-kcp-admin \
+  --timeout="${DEPLOYMENT_TIMEOUT}"
+
+  kubectl get secret admin-kubeconfig -o jsonpath="{.data.kubeconfig}" | base64 -d > "${REPO_ROOT}/admin.kubeconfig"
+
+  KUBECONFIG="${REPO_ROOT}/admin.kubeconfig" kubectl get pods
   log "kcp deployed."
 }
 
@@ -271,28 +218,13 @@ main() {
   log "  Deploy Infrastructure to Kind Cluster"
   log "=========================================="
   log "Cluster name: ${CLUSTER_NAME}"
-  log "kcp namespace: ${KCP_NAMESPACE}"
-  log "External URL: https://${KCP_EXTERNAL_HOSTNAME}:${KCP_PORT}"
-  log "KCP Node Port: ${KCP_NODE_PORT}"
+  log "Cluster config: ${REPO_ROOT}/${KIND_CONFIG}"
   log "Deployment Timeout: ${DEPLOYMENT_TIMEOUT}"
   log ""
 
   preflight_checks
-
-  # Step 1: Create kind cluster
-  log "=== Step 1/4: Create kind cluster ==="
   create_kind_cluster
-
-  # Step 2: Install flux-operator
-  log "=== Step 2/4: Install flux-operator ==="
-  install_flux_operator
-
-  # Step 3: Install cert-manager
-  log "=== Step 3/4: Install cert-manager ==="
   install_cert_manager
-
-  # Step 3: Deploy kcp
-  log "=== Step 4/4: Deploy kcp ==="
   deploy_kcp
 
   log ""
@@ -300,7 +232,7 @@ main() {
   log "  Infrastructure deployment complete!"
   log "=========================================="
   log "Cluster: ${CLUSTER_NAME}"
-  log "flux-operator version: ${FLUX_OPERATOR_VERSION}"
+  # log "flux-operator version: ${FLUX_OPERATOR_VERSION}"
   log "cert-manager version: ${CERT_MANAGER_VERSION}"
   log "To tear down: make teardown-infra"
 }
