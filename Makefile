@@ -5,3 +5,7 @@ deploy-infra:
 .PHONY: teardown-infra
 teardown-infra:
 	hack/teardown-infra.sh
+
+.PHONY: proxy-up
+proxy-up:
+	hack/proxy-up.sh

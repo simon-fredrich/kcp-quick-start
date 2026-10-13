@@ -14,7 +14,7 @@ CLUSTER_NAME="${CLUSTER_NAME:-kcp}"
 KIND_CONFIG="${KIND_CONFIG:-kind-config.yaml}"
 ROOT_SHARD="${ROOT_SHARD:-root-shard.yaml}"
 FRONT_PROXY="${FRONT_PROXY:-front-proxy.yaml}"
-ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin-kubeconfig.yaml}"
+ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin-kubeconfig}"
 DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-600s}"
 
 CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.21.2}"
@@ -55,12 +55,16 @@ preflight_checks() {
 # exists) and select it as the current kubectl context.
 # ---------------------------------------------------------------------------
 create_kind_cluster() {
+  KUBECONFIG="$(mktemp "${TMPDIR:-/tmp}/kcp-infra-kubeconfig.XXXXXX")"
+  export KUBECONFIG
+  trap 'rm -f "${KUBECONFIG}"' EXIT
+
   if kind get clusters 2>/dev/null | grep -qx "${CLUSTER_NAME}"; then
     log "Kind cluster '${CLUSTER_NAME}' already exists — skipping creation."
   else
-    log "Generating kind cluster config..."
+    log "Creating kind cluster..."
 
-    cat >"${REPO_ROOT}/${KIND_CONFIG}" <<EOF
+    cat <<EOF | kind create cluster --name "${CLUSTER_NAME}" --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -70,10 +74,9 @@ nodes:
     hostPort: 8443
     protocol: TCP
 EOF
-
-    kind create cluster --name "${CLUSTER_NAME}" --config="${REPO_ROOT}/${KIND_CONFIG}"
     log "Kind cluster '${CLUSTER_NAME}' created."
   fi
+  kind get kubeconfig --name "${CLUSTER_NAME}" > "${KUBECONFIG}"
   kubectl config use-context "kind-${CLUSTER_NAME}"
 }
 
@@ -82,12 +85,18 @@ EOF
 # ---------------------------------------------------------------------------
 install_cert_manager() {
   kubectl apply -f \
-    "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" --wait=true
+    "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
+  kubectl -n cert-manager rollout status deployment/cert-manager \
+    --timeout="${DEPLOYMENT_TIMEOUT}"
+  kubectl -n cert-manager rollout status deployment/cert-manager-cainjector \
+    --timeout="${DEPLOYMENT_TIMEOUT}"
+  kubectl -n cert-manager rollout status deployment/cert-manager-webhook \
+    --timeout="${DEPLOYMENT_TIMEOUT}"
   log "cert-manager is Available."
 }
 
 # ---------------------------------------------------------------------------
-# deploy_kcp — Install kcp via helm
+# deploy_kcp — Install kcp via helm & kcp-operator
 # ---------------------------------------------------------------------------
 deploy_kcp() {
   log "Add kcp repo to helm"
@@ -118,101 +127,40 @@ deploy_kcp() {
   fi
 
   log "Create Root Shard"
-  cat <<EOF | kubectl apply -f -
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: selfsigned
-spec:
-  selfSigned: {}
-EOF
-  kubectl wait --for=condition=Ready issuer/selfsigned \
-  --timeout="${DEPLOYMENT_TIMEOUT}"
-  
-  cat <<EOF | kubectl apply -f -
-apiVersion: operator.kcp.io/v1alpha1
-kind: RootShard
-metadata:
-  name: root
-spec:
-  external:
-    # replace the hostname with the external DNS name for your kcp instance
-    hostname: localhost
-    port: 6443
-  certificates:
-    # this references the issuer created above
-    issuerRef:
-      group: cert-manager.io
-      kind: Issuer
-      name: selfsigned
-  cache:
-    embedded:
-      # kcp comes with a cache server accessible to all shards,
-      # in this case it is fine to enable the embedded instance
-      enabled: true
-  etcd:
-    endpoints:
-      # this is the service URL to etcd. Replace if Helm chart was
-      # installed under a different name or the namespace is not "default"
-      - http://etcd.default.svc.cluster.local:2379
-EOF
+  kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/rootshard.yaml"
+
   kubectl wait --for=condition=Available rootshard/root \
   --timeout="${DEPLOYMENT_TIMEOUT}"
 
   log "Set up Front Proxy"
-  cat <<EOF | kubectl apply -f -
-apiVersion: operator.kcp.io/v1alpha1
-kind: FrontProxy
-metadata:
-  name: frontproxy
-spec:
-  rootShard:
-    ref:
-      # the name of the RootShard object created before
-      name: root
-  serviceTemplate:
-    spec:
-      # expose this front-proxy via a load balancer
-      type: LoadBalancer
-EOF
-  kubectl wait --for=condition=Available frontproxy/frontproxy \
+  kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/frontproxy.yaml"
+
+  kubectl wait --for=condition=Available frontproxy/frontproxy-sample \
   --timeout="${DEPLOYMENT_TIMEOUT}"
 
   log "Create admin-kubeconfig"
-  cat <<EOF | kubectl apply -f -
-apiVersion: operator.kcp.io/v1alpha1
-kind: Kubeconfig
-metadata:
-  name: kubeconfig-kcp-admin
-spec:
-  # the user name embedded in the kubeconfig
-  username: kcp-admin
-  groups:
-    # system:kcp:admin is a special privileged group in kcp.
-    # the kubeconfig generated from this should be kept secure at all times
-    - system:kcp:admin
-  # the kubeconfig will be valid for 365d but will be automatically refreshed
-  validity: 8766h
-  secretRef:
-    # the name of the secret that the assembled kubeconfig should be written to
-    name: admin-kubeconfig
-  target:
-    # a reference to the frontproxy deployed previously so the kubeconfig is accepted by it
-    frontProxyRef:
-      name: frontproxy
-EOF
+  kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/kubeconfig.yaml"
+
   kubectl wait --for=condition=Available kubeconfig/kubeconfig-kcp-admin \
   --timeout="${DEPLOYMENT_TIMEOUT}"
 
-  kubectl get secret admin-kubeconfig -o jsonpath="{.data.kubeconfig}" | base64 -d > "${REPO_ROOT}/admin.kubeconfig"
+  local admin_kubeconfig_tmp
+  admin_kubeconfig_tmp="$(mktemp "${REPO_ROOT}/.admin.kubeconfig.XXXXXX")"
+  if ! kubectl -n default get secret admin-kubeconfig -o jsonpath="{.data.kubeconfig}" | base64 -d > "${admin_kubeconfig_tmp}"; then
+    rm -f "${admin_kubeconfig_tmp}"
+    return 1
+  fi
+  if [[ ! -s "${admin_kubeconfig_tmp}" ]]; then
+    log "ERROR: admin-kubeconfig Secret contains no kubeconfig."
+    rm -f "${admin_kubeconfig_tmp}"
+    return 1
+  fi
+  mv "${admin_kubeconfig_tmp}" "${REPO_ROOT}/admin.kubeconfig"
 
-  KUBECONFIG="${REPO_ROOT}/admin.kubeconfig" kubectl get pods
+  kubectl get pods -A
   log "kcp deployed."
 }
 
-# ---------------------------------------------------------------------------
-# main — Orchestrate the n-step deployment sequence.
-# ---------------------------------------------------------------------------
 main() {
   log "=========================================="
   log "  Deploy Infrastructure to Kind Cluster"
@@ -232,13 +180,11 @@ main() {
   log "  Infrastructure deployment complete!"
   log "=========================================="
   log "Cluster: ${CLUSTER_NAME}"
-  # log "flux-operator version: ${FLUX_OPERATOR_VERSION}"
   log "cert-manager version: ${CERT_MANAGER_VERSION}"
+  log "To expose front-proxy locally: make proxy-up"
   log "To tear down: make teardown-infra"
 }
 
-# Run main only when executed directly so the functions above can be sourced
-# and exercised individually (e.g. from a test harness).
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   main "$@"
 fi

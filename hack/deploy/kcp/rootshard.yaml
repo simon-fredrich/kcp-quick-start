@@ -1,0 +1,56 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned
+  namespace: default
+spec:
+  selfSigned: {}
+---
+apiVersion: operator.kcp.io/v1alpha1
+kind: RootShard
+metadata:
+  labels:
+    app.kubernetes.io/name: kcp-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: root
+spec:
+  # here, the external publicly accessible endpoint for kcp users is described.
+  # it is used for the frontproxy.
+  external:
+    hostname: localhost
+    port: 6443
+  certificates:
+    issuerRef:
+      group: cert-manager.io
+      kind: Issuer
+      name: selfsigned
+  serviceTemplate:
+    spec:
+      type: ClusterIP
+
+  auth:
+    serviceAccount:
+      # if you want controllers to access particular workspaces using service accounts
+      # serviceAccounts must be enabled, on all shards and the front-proxy.
+      enabled: true
+
+  cache:
+    embedded:
+      enabled: true
+  etcd:
+    endpoints:
+      - http://etcd.default.svc.cluster.local:2379
+    # if https should be used the tlsSecret must be configured using the client secret
+    # from etcd (in secondary shards, similarly).
+    #tlsConfig;
+    #  secretRef:
+    #    name: etcd-client
+  deploymentTemplate:
+    spec:
+      template:
+        spec:
+          hostAliases:
+            # add a hardcoded DNS override to the same IP as in v1alpha1_frontproxy.yaml.
+            - ip: "10.96.100.100"
+              hostnames:
+                - "localhost"

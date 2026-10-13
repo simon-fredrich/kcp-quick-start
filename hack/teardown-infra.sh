@@ -6,10 +6,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CLUSTER_NAME="${CLUSTER_NAME:-kcp}"
-ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin-kubeconfig.yaml}"
+ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin.kubeconfig}"
+KIND_CONFIG="${KIND_CONFIG:-kind-config.yaml}"
 
 # ---------------------------------------------------------------------------
 # log — Print a timestamped log message (ISO 8601 UTC).
@@ -20,12 +21,19 @@ log() {
 
 main() {
   log "=== Teardown Infrastructure ==="
+
   log "Deleting kind cluster '${CLUSTER_NAME}'..."
   kind delete cluster --name "${CLUSTER_NAME}" 2>/dev/null || true
   log "Cluster '${CLUSTER_NAME}' deleted (or did not exist)."
+
   log "Deleting ${ADMIN_KUBECONFIG}..."
   rm "${ADMIN_KUBECONFIG}"
   log "${ADMIN_KUBECONFIG} deleted (or did not exist)."
+
+  log "Deleting ${KIND_CONFIG}..."
+  rm "${KIND_CONFIG}"
+  log "${KIND_CONFIG} deleted (or did not exist)."
+
   log "=== Done ==="
 }
 
