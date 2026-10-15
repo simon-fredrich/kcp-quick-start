@@ -1,10 +1,7 @@
 apiVersion: operator.kcp.io/v1alpha1
 kind: FrontProxy
 metadata:
-  labels:
-    app.kubernetes.io/name: kcp-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: frontproxy-sample
+  name: frontproxy
 spec:
   auth:
     serviceAccount:
@@ -13,12 +10,11 @@ spec:
       enabled: true
   rootShard:
     ref:
+      # the name of the RootShard object created before
       name: root
-  external:
-    hostname: localhost
-    port: 6443
   serviceTemplate:
     spec:
+      # expose this front-proxy via a load balancer
       type: ClusterIP
       # hard code a specific cluster IP, e.g. for a kind setup.
       clusterIP: 10.96.100.100

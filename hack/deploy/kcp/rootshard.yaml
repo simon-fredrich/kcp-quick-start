@@ -2,55 +2,50 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: selfsigned
-  namespace: default
 spec:
   selfSigned: {}
+
 ---
+
 apiVersion: operator.kcp.io/v1alpha1
 kind: RootShard
 metadata:
-  labels:
-    app.kubernetes.io/name: kcp-operator
-    app.kubernetes.io/managed-by: kustomize
   name: root
 spec:
-  # here, the external publicly accessible endpoint for kcp users is described.
-  # it is used for the frontproxy.
   external:
-    hostname: localhost
+    # NOTE: this must NOT be "localhost": Kubernetes always writes its own
+    # "127.0.0.1 localhost" entry into every pod's /etc/hosts, and hostAliases
+    # (used below in Shard objects) can only append entries, never override it.
+    # Using "localhost" here means shard pods trying to reach the front-proxy
+    # via this hostname silently loop back to themselves instead. Use a fake,
+    # dedicated hostname instead and map it via hostAliases + your own machine's
+    # /etc/hosts (see README/DEVELOPMENT notes).
+    hostname: kcp.quickstart.local
     port: 6443
   certificates:
+    # this references the issuer created above
     issuerRef:
       group: cert-manager.io
       kind: Issuer
       name: selfsigned
-  serviceTemplate:
-    spec:
-      type: ClusterIP
-
-  auth:
-    serviceAccount:
-      # if you want controllers to access particular workspaces using service accounts
-      # serviceAccounts must be enabled, on all shards and the front-proxy.
-      enabled: true
-
   cache:
     embedded:
+      # kcp comes with a cache server accessible to all shards,
+      # in this case it is fine to enable the embedded instance
       enabled: true
   etcd:
     endpoints:
+      # this is the service URL to etcd. Replace if Helm chart was
+      # installed under a different name or the namespace is not "default"
       - http://etcd-root.default.svc.cluster.local:2379
-    # if https should be used the tlsSecret must be configured using the client secret
-    # from etcd (in secondary shards, similarly).
-    #tlsConfig;
-    #  secretRef:
-    #    name: etcd-client
   deploymentTemplate:
     spec:
       template:
         spec:
           hostAliases:
-            # add a hardcoded DNS override to the same IP as in v1alpha1_frontproxy.yaml.
+            # root shard also needs to reach the front-proxy via the external
+            # hostname (e.g. for cross-shard initializer/virtual-workspace calls),
+            # which otherwise doesn't resolve inside this pod at all.
             - ip: "10.96.100.100"
               hostnames:
-                - "localhost"
+                - kcp.quickstart.local

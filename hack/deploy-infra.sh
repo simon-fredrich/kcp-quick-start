@@ -118,15 +118,16 @@ deploy_kcp() {
     git clone https://github.com/kcp-dev/kcp-operator
   fi
 
-  if helm status etcd >/dev/null 2>&1; then
-    log "etcd is already installed"
-  else
-    log "etcd is not installed"
-    log "Install etcd from kcp-operator using helm"
-    helm install etcd-root "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
-    helm install etcd-1 "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
-    helm install etcd-2 "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
-  fi
+  for etcd_name in etcd-root etcd-1 etcd-2; do
+    if kubectl get "pod/${etcd_name}-0" -o jsonpath='{.status.conditions[?(@.type=="Initialized")].status}' &>/dev/null; then
+      log "etcd ${etcd_name} is already installed"
+    else
+      log "etcd ${etcd_name} is not installed"
+      log "Install etcd ${etcd_name} from kcp-operator using helm"
+
+      helm install "${etcd_name}" "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
+    fi
+  done
 
   log "Create Root Shard"
   kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/rootshard.yaml"
@@ -137,7 +138,7 @@ deploy_kcp() {
   log "Set up Front Proxy"
   kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/frontproxy.yaml"
 
-  kubectl wait --for=condition=Available frontproxy/frontproxy-sample \
+  kubectl wait --for=condition=Available frontproxy/frontproxy \
   --timeout="${DEPLOYMENT_TIMEOUT}"
 
   log "Create admin-kubeconfig"

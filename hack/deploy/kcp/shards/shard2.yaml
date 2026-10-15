@@ -22,7 +22,8 @@ spec:
       template:
         spec:
           hostAliases:
-            # add a hardcoded DNS override to the same IP as in v1alpha1_frontproxy.yaml.
+            # add a hardcoded DNS override to the same IP as in frontproxy.yaml.
+            # must match the RootShard's external.hostname (NOT "localhost").
             - ip: "10.96.100.100"
               hostnames:
-                - localhost
+                - kcp.quickstart.local

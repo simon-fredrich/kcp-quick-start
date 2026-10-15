@@ -1,3 +1,4 @@
 admin.kubeconfig
 *.crt
 *.key
+./kcp-operator
