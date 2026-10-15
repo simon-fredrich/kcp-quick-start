@@ -30,10 +30,6 @@ main() {
   rm "${ADMIN_KUBECONFIG}"
   log "${ADMIN_KUBECONFIG} deleted (or did not exist)."
 
-  log "Deleting ${KIND_CONFIG}..."
-  rm "${KIND_CONFIG}"
-  log "${KIND_CONFIG} deleted (or did not exist)."
-
   log "=== Done ==="
 }
 

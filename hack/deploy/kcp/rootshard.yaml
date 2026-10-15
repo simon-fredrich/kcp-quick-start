@@ -39,7 +39,7 @@ spec:
       enabled: true
   etcd:
     endpoints:
-      - http://etcd.default.svc.cluster.local:2379
+      - http://etcd-root.default.svc.cluster.local:2379
     # if https should be used the tlsSecret must be configured using the client secret
     # from etcd (in secondary shards, similarly).
     #tlsConfig;

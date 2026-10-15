@@ -13,5 +13,9 @@ export KUBECONFIG
 trap 'rm -f "${KUBECONFIG}"' EXIT
 kind get kubeconfig --name "${CLUSTER_NAME}" > "${KUBECONFIG}"
 
-kubectl --context="kind-${CLUSTER_NAME}" -n default port-forward \
-  svc/frontproxy-sample-front-proxy "${PORT}:6443"
+while true; do
+  echo "starting/restarting proxy service"
+  kubectl --context="kind-${CLUSTER_NAME}" -n default port-forward \
+    svc/frontproxy-sample-front-proxy "${PORT}:6443"
+  sleep 3
+done

@@ -123,7 +123,9 @@ deploy_kcp() {
   else
     log "etcd is not installed"
     log "Install etcd from kcp-operator using helm"
-    helm install etcd "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd"
+    helm install etcd-root "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
+    helm install etcd-1 "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
+    helm install etcd-2 "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
   fi
 
   log "Create Root Shard"

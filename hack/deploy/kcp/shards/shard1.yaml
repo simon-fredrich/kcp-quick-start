@@ -8,7 +8,7 @@ metadata:
 spec:
   etcd:
     endpoints:
-      - http://etcd.default.svc.cluster.local:2379
+      - http://etcd-1.default.svc.cluster.local:2379
   rootShard:
     ref:
       name: root
