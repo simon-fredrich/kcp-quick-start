@@ -6,18 +6,22 @@ deploy-infra:
 teardown-infra:
 	hack/teardown-infra.sh
 
+.PHONY: teardown-kcp
+teardown-kcp:
+	hack/teardown-kcp.sh
+
 .PHONY: proxy-up
 proxy-up:
 	hack/proxy-up.sh
 
-.PHONY: cluster-scope
-cluster-scope:
+.PHONY: cluster
+cluster:
 	hack/cluster-scope.sh
 
-.PHONY: admin-scope
-admin-scope:
+.PHONY: admin
+admin:
 	hack/admin-scope.sh
 
-.PHONY: shards-up
-shards-up:
-	kubectl apply -f ./hack/deploy/kcp/shards
+.PHONY: deploy-kcp
+deploy-kcp:
+	hack/deploy-kcp.sh

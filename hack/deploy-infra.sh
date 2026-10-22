@@ -95,75 +95,6 @@ install_cert_manager() {
   log "cert-manager is Available."
 }
 
-# ---------------------------------------------------------------------------
-# deploy_kcp — Install kcp via helm & kcp-operator
-# ---------------------------------------------------------------------------
-deploy_kcp() {
-  log "Add kcp repo to helm"
-  helm repo add kcp https://kcp-dev.github.io/helm-charts >/dev/null
-  helm repo update >/dev/null
-
-  log "Check if kcp-operator is already installed"
-  if helm status kcp-operator --namespace kcp-operator >/dev/null 2>&1; then
-    log "kcp-operator is already installed"
-  else
-    log "kcp-operator is not installed"
-    log "Install kcp-operator using helm"
-    helm install --create-namespace --namespace kcp-operator kcp-operator kcp/kcp-operator
-  fi
-
-  if ls kcp-operator >/dev/null 2>&1; then
-    log "https://github.com/kcp-dev/kcp-operator already cloned"
-  else
-    git clone https://github.com/kcp-dev/kcp-operator
-  fi
-
-  for etcd_name in etcd-root etcd-1 etcd-2; do
-    if kubectl get "pod/${etcd_name}-0" -o jsonpath='{.status.conditions[?(@.type=="Initialized")].status}' &>/dev/null; then
-      log "etcd ${etcd_name} is already installed"
-    else
-      log "etcd ${etcd_name} is not installed"
-      log "Install etcd ${etcd_name} from kcp-operator using helm"
-
-      helm install "${etcd_name}" "${REPO_ROOT}/kcp-operator/hack/ci/testdata/etcd" -n default
-    fi
-  done
-
-  log "Create Root Shard"
-  kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/rootshard.yaml"
-
-  kubectl wait --for=condition=Available rootshard/root \
-  --timeout="${DEPLOYMENT_TIMEOUT}"
-
-  log "Set up Front Proxy"
-  kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/frontproxy.yaml"
-
-  kubectl wait --for=condition=Available frontproxy/frontproxy \
-  --timeout="${DEPLOYMENT_TIMEOUT}"
-
-  log "Create admin-kubeconfig"
-  kubectl apply -f "${SCRIPT_DIR}/deploy/kcp/kubeconfig.yaml"
-
-  kubectl wait --for=condition=Available kubeconfig/kubeconfig-kcp-admin \
-  --timeout="${DEPLOYMENT_TIMEOUT}"
-
-  local admin_kubeconfig_tmp
-  admin_kubeconfig_tmp="$(mktemp "${REPO_ROOT}/.admin.kubeconfig.XXXXXX")"
-  if ! kubectl -n default get secret admin-kubeconfig -o jsonpath="{.data.kubeconfig}" | base64 -d > "${admin_kubeconfig_tmp}"; then
-    rm -f "${admin_kubeconfig_tmp}"
-    return 1
-  fi
-  if [[ ! -s "${admin_kubeconfig_tmp}" ]]; then
-    log "ERROR: admin-kubeconfig Secret contains no kubeconfig."
-    rm -f "${admin_kubeconfig_tmp}"
-    return 1
-  fi
-  mv "${admin_kubeconfig_tmp}" "${REPO_ROOT}/admin.kubeconfig"
-
-  kubectl get pods -A
-  log "kcp deployed."
-}
-
 main() {
   log "=========================================="
   log "  Deploy Infrastructure to Kind Cluster"
@@ -176,7 +107,6 @@ main() {
   preflight_checks
   create_kind_cluster
   install_cert_manager
-  deploy_kcp
 
   log ""
   log "=========================================="

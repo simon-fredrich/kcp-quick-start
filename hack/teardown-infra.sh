@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 
-# teardown-infra.sh — Delete the kind cluster and remove the certs and
-# kubeconfigs deploy-infra.sh generated.
+# teardown-infra.sh — Delete the kind cluster created by deploy-infra.sh.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
 CLUSTER_NAME="${CLUSTER_NAME:-kcp}"
-ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin.kubeconfig}"
-KIND_CONFIG="${KIND_CONFIG:-kind-config.yaml}"
+export KIND_EXPERIMENTAL_PROVIDER="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 
 # ---------------------------------------------------------------------------
 # log — Print a timestamped log message (ISO 8601 UTC).
@@ -25,10 +20,6 @@ main() {
   log "Deleting kind cluster '${CLUSTER_NAME}'..."
   kind delete cluster --name "${CLUSTER_NAME}" 2>/dev/null || true
   log "Cluster '${CLUSTER_NAME}' deleted (or did not exist)."
-
-  log "Deleting ${ADMIN_KUBECONFIG}..."
-  rm "${ADMIN_KUBECONFIG}"
-  log "${ADMIN_KUBECONFIG} deleted (or did not exist)."
 
   log "=== Done ==="
 }
