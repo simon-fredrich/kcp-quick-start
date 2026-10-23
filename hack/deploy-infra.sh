@@ -11,10 +11,9 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Configuration
 # ---------------------------------------------------------------------------
 CLUSTER_NAME="${CLUSTER_NAME:-kcp}"
-KIND_CONFIG="${KIND_CONFIG:-kind-config.yaml}"
-ROOT_SHARD="${ROOT_SHARD:-root-shard.yaml}"
-FRONT_PROXY="${FRONT_PROXY:-front-proxy.yaml}"
-ADMIN_KUBECONFIG="${ADMIN_KUBECONFIG:-admin-kubeconfig}"
+KUBE_DIR="${REPO_ROOT}/.kube"
+KIND_CONFIG="${KUBE_DIR}/${KIND_CONFIG:-kind.kubeconfig}"
+ADMIN_KUBECONFIG="${KUBE_DIR}/${ADMIN_KUBECONFIG:-admin.kubeconfig}"
 DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-600s}"
 
 CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.21.2}"
@@ -55,9 +54,7 @@ preflight_checks() {
 # exists) and select it as the current kubectl context.
 # ---------------------------------------------------------------------------
 create_kind_cluster() {
-  KUBECONFIG="$(mktemp "${TMPDIR:-/tmp}/kcp-infra-kubeconfig.XXXXXX")"
-  export KUBECONFIG
-  trap 'rm -f "${KUBECONFIG}"' EXIT
+  mkdir -p ${KUBE_DIR}
 
   if kind get clusters 2>/dev/null | grep -qx "${CLUSTER_NAME}"; then
     log "Kind cluster '${CLUSTER_NAME}' already exists — skipping creation."
@@ -76,21 +73,21 @@ nodes:
 EOF
     log "Kind cluster '${CLUSTER_NAME}' created."
   fi
-  kind get kubeconfig --name "${CLUSTER_NAME}" > "${KUBECONFIG}"
-  kubectl config use-context "kind-${CLUSTER_NAME}"
+  kind get kubeconfig --name "${CLUSTER_NAME}" > "${KIND_CONFIG}"
+  kubectl --kubeconfig=${KIND_CONFIG} config use-context "kind-${CLUSTER_NAME}"
 }
 
 # ---------------------------------------------------------------------------
 # install_cert_manager — Apply cert-manager and wait for it to roll out.
 # ---------------------------------------------------------------------------
 install_cert_manager() {
-  kubectl apply -f \
+  kubectl --kubeconfig=${KIND_CONFIG} apply -f \
     "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
-  kubectl -n cert-manager rollout status deployment/cert-manager \
+  kubectl --kubeconfig=${KIND_CONFIG} -n cert-manager rollout status deployment/cert-manager \
     --timeout="${DEPLOYMENT_TIMEOUT}"
-  kubectl -n cert-manager rollout status deployment/cert-manager-cainjector \
+  kubectl --kubeconfig=${KIND_CONFIG} -n cert-manager rollout status deployment/cert-manager-cainjector \
     --timeout="${DEPLOYMENT_TIMEOUT}"
-  kubectl -n cert-manager rollout status deployment/cert-manager-webhook \
+  kubectl --kubeconfig=${KIND_CONFIG} -n cert-manager rollout status deployment/cert-manager-webhook \
     --timeout="${DEPLOYMENT_TIMEOUT}"
   log "cert-manager is Available."
 }

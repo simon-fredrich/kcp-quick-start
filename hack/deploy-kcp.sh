@@ -10,6 +10,9 @@ DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-600s}"
 KCP_VERSION="${KCP_VERSION:-v0.33.1}"
 ETCD_IMAGE="${ETCD_IMAGE:-europe-docker.pkg.dev/gardener-project/public/gardener/etcd-wrapper:v0.6.2}"
 ETCD_BACKUP_IMAGE="${ETCD_BACKUP_IMAGE:-europe-docker.pkg.dev/gardener-project/public/gardener/etcdbrctl:v0.41.2}"
+KUBE_DIR="${REPO_ROOT}/.kube"
+KIND_CONFIG="${KUBE_DIR}/${KIND_CONFIG:-kind.kubeconfig}"
+ADMIN_KUBECONFIG="${KUBE_DIR}/${ADMIN_KUBECONFIG:-admin.kubeconfig}"
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
@@ -30,7 +33,7 @@ preflight_checks() {
 apply_etcd() {
   local etcd_name="$1"
 
-  kubectl apply -f - <<EOF
+  kubectl --kubeconfig=${KIND_CONFIG} apply -f - <<EOF
 apiVersion: druid.gardener.cloud/v1alpha1
 kind: Etcd
 metadata:
@@ -86,7 +89,7 @@ apply_shard() {
   local shard_name="$1"
   local etcd_name="$2"
 
-  kubectl apply -f - <<EOF
+  kubectl --kubeconfig=${KIND_CONFIG} apply -f - <<EOF
 apiVersion: operator.kcp.io/v1alpha1
 kind: Shard
 metadata:
@@ -116,22 +119,22 @@ spec:
               hostnames:
                 - kcp.quickstart.local
 EOF
-  kubectl wait --for=condition=Available "shard/${shard_name}" \
+  kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available "shard/${shard_name}" \
     --timeout="${DEPLOYMENT_TIMEOUT}"
 }
 
 deploy_kcp() {
   log "Add kcp repo to helm"
-  helm repo add kcp https://kcp-dev.github.io/helm-charts >/dev/null
-  helm repo update >/dev/null
+  helm --kubeconfig=${KIND_CONFIG} repo add kcp https://kcp-dev.github.io/helm-charts >/dev/null
+  helm --kubeconfig=${KIND_CONFIG} repo update >/dev/null
 
   log "Check if kcp-operator is already installed"
-  if helm status kcp-operator --namespace kcp-operator >/dev/null 2>&1; then
+  if helm --kubeconfig=${KIND_CONFIG} status kcp-operator --namespace kcp-operator >/dev/null 2>&1; then
     log "kcp-operator is already installed"
   else
     log "kcp-operator is not installed"
     log "Install kcp-operator using helm"
-    helm install --create-namespace --namespace kcp-operator kcp-operator kcp/kcp-operator
+    helm --kubeconfig=${KIND_CONFIG} install --create-namespace --namespace kcp-operator kcp-operator kcp/kcp-operator
   fi
 
   if [[ -d "${REPO_ROOT}/etcd-druid" ]]; then
@@ -141,22 +144,22 @@ deploy_kcp() {
   fi
 
   log "Check if etcd-druid is already installed"
-  if helm status etcd-druid >/dev/null 2>&1; then
+  if helm --kubeconfig=${KIND_CONFIG} status etcd-druid >/dev/null 2>&1; then
     log "etcd-druid is already installed"
   else
     log "etcd-druid is not installed"
     log "Install etcd-druid using helm"
-    helm install etcd-druid "${REPO_ROOT}/etcd-druid/charts"
+    helm --kubeconfig=${KIND_CONFIG} install etcd-druid "${REPO_ROOT}/etcd-druid/charts"
   fi
 
   for etcd_name in etcd-root etcd-1 etcd-2; do
     apply_etcd "${etcd_name}"
-    kubectl wait --for=condition=Ready "etcd/${etcd_name}" \
+    kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Ready "etcd/${etcd_name}" \
       --timeout="${DEPLOYMENT_TIMEOUT}"
   done
 
   log "Create Root Shard"
-  kubectl apply -f - <<EOF
+  kubectl --kubeconfig=${KIND_CONFIG} apply -f - <<EOF
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -199,7 +202,7 @@ spec:
               hostnames:
                 - kcp.quickstart.local
 EOF
-  kubectl wait --for=condition=Available rootshard/root \
+  kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available rootshard/root \
     --timeout="${DEPLOYMENT_TIMEOUT}"
 
   log "Create Shards"
@@ -207,7 +210,7 @@ EOF
   apply_shard shard-02 etcd-2
 
   log "Set up Front Proxy"
-  kubectl apply -f - <<EOF
+  kubectl --kubeconfig=${KIND_CONFIG} apply -f - <<EOF
 apiVersion: operator.kcp.io/v1alpha1
 kind: FrontProxy
 metadata:
@@ -235,11 +238,11 @@ spec:
           - 127.0.0.1
           - 127.0.0.2
 EOF
-  kubectl wait --for=condition=Available frontproxy/frontproxy \
+  kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available frontproxy/frontproxy \
     --timeout="${DEPLOYMENT_TIMEOUT}"
 
   log "Create admin-kubeconfig"
-  kubectl apply -f - <<EOF
+  kubectl --kubeconfig=${KIND_CONFIG} apply -f - <<EOF
 apiVersion: operator.kcp.io/v1alpha1
 kind: Kubeconfig
 metadata:
@@ -255,12 +258,12 @@ spec:
     frontProxyRef:
       name: frontproxy
 EOF
-  kubectl wait --for=condition=Available kubeconfig/kubeconfig-kcp-admin \
+  kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available kubeconfig/kubeconfig-kcp-admin \
     --timeout="${DEPLOYMENT_TIMEOUT}"
 
   local admin_kubeconfig_tmp
   admin_kubeconfig_tmp="$(mktemp "${REPO_ROOT}/.admin.kubeconfig.XXXXXX")"
-  if ! kubectl -n default get secret admin-kubeconfig -o jsonpath="{.data.kubeconfig}" | base64 -d > "${admin_kubeconfig_tmp}"; then
+  if ! kubectl --kubeconfig=${KIND_CONFIG} -n default get secret admin-kubeconfig -o jsonpath="{.data.kubeconfig}" | base64 -d > "${admin_kubeconfig_tmp}"; then
     rm -f "${admin_kubeconfig_tmp}"
     return 1
   fi
@@ -269,9 +272,9 @@ EOF
     rm -f "${admin_kubeconfig_tmp}"
     return 1
   fi
-  mv "${admin_kubeconfig_tmp}" "${REPO_ROOT}/admin.kubeconfig"
+  mv "${admin_kubeconfig_tmp}" "${ADMIN_KUBECONFIG}"
 
-  kubectl get pods -A
+  kubectl --kubeconfig=${KIND_CONFIG} get pods -A
   log "kcp deployed."
 }
 

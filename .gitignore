@@ -1,4 +1,5 @@
-admin.kubeconfig
+.kube
 *.crt
 *.key
-./kcp-operator
+kcp-operator
+etcd-druid

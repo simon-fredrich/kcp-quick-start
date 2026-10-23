@@ -7,6 +7,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-600s}"
+KUBE_DIR="${REPO_ROOT}/.kube"
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
@@ -60,7 +61,7 @@ main() {
   uninstall_release kcp-operator kcp-operator
 
   log "Removing generated admin kubeconfig..."
-  rm -f "${REPO_ROOT}/admin.kubeconfig"
+  rm -f "${KUBE_DIR}"
 
   log "=== kcp teardown complete ==="
 }
