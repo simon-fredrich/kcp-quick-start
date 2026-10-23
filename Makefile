@@ -25,3 +25,9 @@ admin:
 .PHONY: deploy-kcp
 deploy-kcp:
 	hack/deploy-kcp.sh
+
+.PHONY: up
+up: deploy-infra deploy-kcp
+
+.PHONY: down
+down: teardown-infra
