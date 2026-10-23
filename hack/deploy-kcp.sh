@@ -110,14 +110,6 @@ spec:
       enabled: true
   image:
     tag: ${KCP_VERSION}
-  deploymentTemplate:
-    spec:
-      template:
-        spec:
-          hostAliases:
-            - ip: "10.96.100.100"
-              hostnames:
-                - kcp.quickstart.local
 EOF
   kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available "shard/${shard_name}" \
     --timeout="${DEPLOYMENT_TIMEOUT}"
@@ -173,8 +165,10 @@ metadata:
   name: root
 spec:
   external:
-    hostname: kcp.quickstart.local
-    port: 6443
+    hostname: localhost
+    port: 8443
+    privateHostname: frontproxy-front-proxy.default.svc.cluster.local
+    privatePort: 8443
   certificates:
     issuerRef:
       group: cert-manager.io
@@ -193,14 +187,6 @@ spec:
     replicas: 1
     image:
       tag: ${KCP_VERSION}
-  deploymentTemplate:
-    spec:
-      template:
-        spec:
-          hostAliases:
-            - ip: "10.96.100.100"
-              hostnames:
-                - kcp.quickstart.local
 EOF
   kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available rootshard/root \
     --timeout="${DEPLOYMENT_TIMEOUT}"
@@ -236,7 +222,23 @@ spec:
           - localhost
         ipAddresses:
           - 127.0.0.1
-          - 127.0.0.2
+---
+# Operator forces its Service to ClusterIP, kind reaches the frontproxy via this NodePort.
+apiVersion: v1
+kind: Service
+metadata:
+  name: front-proxy-nodeport
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/component: front-proxy
+    app.kubernetes.io/instance: frontproxy
+  ports:
+    - name: https
+      port: 6443
+      targetPort: 6443
+      nodePort: 30443
+
 EOF
   kubectl --kubeconfig=${KIND_CONFIG} wait --for=condition=Available frontproxy/frontproxy \
     --timeout="${DEPLOYMENT_TIMEOUT}"
@@ -269,6 +271,13 @@ EOF
   fi
   if [[ ! -s "${admin_kubeconfig_tmp}" ]]; then
     log "ERROR: admin-kubeconfig Secret contains no kubeconfig."
+    rm -f "${admin_kubeconfig_tmp}"
+    return 1
+  fi
+  local admin_cluster
+  if ! admin_cluster="$(kubectl --kubeconfig="${admin_kubeconfig_tmp}" config view --minify -o jsonpath='{.clusters[0].name}')" ||
+    ! kubectl --kubeconfig="${admin_kubeconfig_tmp}" config set-cluster "${admin_cluster}" \
+      --server="https://localhost:8443/clusters/root"; then
     rm -f "${admin_kubeconfig_tmp}"
     return 1
   fi

@@ -111,7 +111,6 @@ main() {
   log "=========================================="
   log "Cluster: ${CLUSTER_NAME}"
   log "cert-manager version: ${CERT_MANAGER_VERSION}"
-  log "To expose front-proxy locally: make proxy-up"
   log "To tear down: make teardown-infra"
 }
 

@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOYMENT_TIMEOUT="${DEPLOYMENT_TIMEOUT:-600s}"
 KUBE_DIR="${REPO_ROOT}/.kube"
+KIND_CONFIG="${KUBE_DIR}/${KIND_CONFIG:-kind.kubeconfig}"
+ADMIN_KUBECONFIG="${KUBE_DIR}/${ADMIN_KUBECONFIG:-admin.kubeconfig}"
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
@@ -30,7 +32,7 @@ delete_resource() {
   local name="$2"
 
   log "Deleting ${resource}/${name}..."
-  kubectl delete "${resource}/${name}" --ignore-not-found --wait=true \
+  kubectl --kubeconfig=${KIND_CONFIG} delete "${resource}/${name}" --ignore-not-found --wait=true \
     --timeout="${DEPLOYMENT_TIMEOUT}"
 }
 
@@ -39,7 +41,7 @@ uninstall_release() {
   local namespace="${2:-default}"
 
   log "Uninstalling Helm release '${release}' from namespace '${namespace}'..."
-  helm uninstall "${release}" --namespace "${namespace}" --ignore-not-found \
+  helm --kubeconfig=${KIND_CONFIG} uninstall "${release}" --namespace "${namespace}" --ignore-not-found \
     --wait --timeout "${DEPLOYMENT_TIMEOUT}"
 }
 
@@ -61,7 +63,7 @@ main() {
   uninstall_release kcp-operator kcp-operator
 
   log "Removing generated admin kubeconfig..."
-  rm -f "${KUBE_DIR}"
+  rm -f "${ADMIN_KUBECONFIG}"
 
   log "=== kcp teardown complete ==="
 }
