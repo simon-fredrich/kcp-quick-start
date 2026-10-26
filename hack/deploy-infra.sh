@@ -92,6 +92,17 @@ install_cert_manager() {
   log "cert-manager is Available."
 }
 
+install_kube_prometheus_stack() {
+  log "Check if prometheus is already installed"
+  if helm --kubeconfig=${KIND_CONFIG} status prometheus --namespace monitoring >/dev/null 2>&1; then
+    log "prometheus is already installed"
+  else
+    log "prometheus is not installed"
+    log "Install prometheus using helm"
+    helm install --kubeconfig=${KIND_CONFIG} --create-namespace --namespace monitoring prometheus oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
+  fi
+}
+
 main() {
   log "=========================================="
   log "  Deploy Infrastructure to Kind Cluster"
@@ -104,6 +115,7 @@ main() {
   preflight_checks
   create_kind_cluster
   install_cert_manager
+  install_kube_prometheus_stack
 
   log ""
   log "=========================================="
