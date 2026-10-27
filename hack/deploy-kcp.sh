@@ -32,8 +32,10 @@ preflight_checks() {
 
 apply_etcd() {
   local etcd_name="$1"
+  local namespace="${2:-default}"
+  local dry_run="${3:-none}"
 
-  kubectl --kubeconfig=${KIND_CONFIG} apply -f - <<EOF
+  kubectl --kubeconfig="${KIND_CONFIG}" -n "${namespace}" apply --dry-run="${dry_run}" -f - <<EOF
 apiVersion: druid.gardener.cloud/v1alpha1
 kind: Etcd
 metadata:
